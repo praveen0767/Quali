@@ -1,0 +1,97 @@
+name: quali
+
+# Values are read from .env (copy .env.production.example -> .env).
+# Secrets are only ever supplied through the environment, never baked into images.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: quali-api:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    init: true
+    # The service only writes to /app/data; everything else is read-only.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    environment:
+      NODE_ENV: production
+      PORT: "8000"
+      HOST: 0.0.0.0
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS in .env}"
+      APP_URL: "${APP_URL:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      REQUEST_TIMEOUT_MS: "${REQUEST_TIMEOUT_MS:-30000}"
+      HEADERS_TIMEOUT_MS: "${HEADERS_TIMEOUT_MS:-20000}"
+      KEEP_ALIVE_TIMEOUT_MS: "${KEEP_ALIVE_TIMEOUT_MS:-65000}"
+      SHUTDOWN_TIMEOUT_MS: "${SHUTDOWN_TIMEOUT_MS:-10000}"
+    volumes:
+      - quali_data:/app/data
+    expose:
+      - "8000"
+    stop_grace_period: 15s
+    mem_limit: 512m
+    cpus: "1.0"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/}
+        VITE_USE_MOCKS: ${VITE_USE_MOCKS:-false}
+    image: quali-web:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      DOMAIN: "${DOMAIN:?set DOMAIN in .env}"
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    mem_limit: 128m
+    cpus: "0.5"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: /bin/sh -c
+    # Renew every 12h; certbot is a no-op until the first certificate exists.
+    command:
+      - "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
+    mem_limit: 128m
+    cpus: "0.25"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  quali_data:
+  letsencrypt:
+  certbot_webroot:

@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+
+# ---------- build: transpile+bundle the API (esbuild only; avoids the
+# project-wide tsc typecheck, which is not part of the production runtime) ----------
+FROM node:22-alpine AS build
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY tsconfig.json ./
+COPY server.ts ./
+COPY src ./src
+
+# --packages=external keeps node_modules dependencies as runtime imports, so the
+# bundled output needs the production dependency tree only (no tsx, no dev deps).
+RUN node_modules/.bin/esbuild server.ts \
+      --bundle \
+      --platform=node \
+      --format=esm \
+      --target=node22 \
+      --packages=external \
+      --sourcemap \
+      --outfile=dist-server/server.mjs
+
+# ---------- deps: production-only node_modules ----------
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+
+# ---------- runtime ----------
+FROM node:22-alpine AS runtime
+ENV NODE_ENV=production \
+    PORT=8000 \
+    HOST=0.0.0.0
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist-server ./dist-server
+COPY package.json ./
+
+# Persistent state lives only in /app/data (mounted as a named volume).
+# Docker seeds a new named volume with this directory's ownership, so the
+# unprivileged runtime user can write to the store from first boot.
+RUN mkdir -p /app/data && chown -R node:node /app/data
+
+USER node
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q --spider http://127.0.0.1:8000/api/v1/health/live || exit 1
+
+CMD ["node", "dist-server/server.mjs"]

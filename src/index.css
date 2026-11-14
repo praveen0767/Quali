@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+@theme {
+  /* Quali Authoritative Design Palette */
+  --color-primary: #0C1946;             /* Deep Navy Anchor */
+  --color-primary-container: #0C1946;
+  --color-on-primary: #ffffff;
+  --color-primary-fixed: #dde1ff;
+  --color-primary-fixed-dim: #b9c4fb;
+  --color-on-primary-fixed: #0a1845;
+  --color-on-primary-fixed-variant: #394473;
+
+  --color-secondary: #245FD2;           /* Action Cobalt Blue */
+  --color-secondary-container: #1D4FB4;
+  --color-on-secondary: #ffffff;
+  --color-secondary-fixed: #dae2ff;
+  --color-secondary-fixed-dim: #b2c5ff;
+  --color-on-secondary-fixed: #001847;
+
+  --color-tertiary: #159A98;            /* Precision Verified Teal */
+  --color-tertiary-container: #002120;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #009492;
+  --color-tertiary-fixed: #87f4f1;
+  --color-tertiary-fixed-dim: #69d8d5;
+
+  --color-accent-violet: #7545D6;       /* Insight Violet */
+  --color-accent-violet-light: #F3EDFC;
+
+  --color-surface: #ffffff;             /* Surface Elevation */
+  --color-surface-dim: #f0f3fa;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f8fafc;
+  --color-surface-container: #f1f5f9;
+  --color-surface-container-high: #e2e8f0;
+  --color-surface-container-highest: #cbd5e1;
+
+  --color-background: #F6F8FC;          /* Canvas Background */
+  --color-on-background: #0C1946;
+  --color-on-surface: #0C1946;          /* Primary Reading Slate-Navy */
+  --color-on-surface-variant: #526079;  /* Secondary Copy Slate */
+  --color-outline: #cbd5e1;
+  --color-outline-variant: #E4E9F2;     /* Subtle Architectural Border */
+
+  /* Verification Status Badges */
+  --color-status-meets-bg: #E8F8F0;
+  --color-status-meets-text: #137333;
+  --color-status-meets-border: #A6E3B8;
+
+  --color-status-insufficient-bg: #FEF7E0;
+  --color-status-insufficient-text: #B06000;
+  --color-status-insufficient-border: #FEE180;
+
+  --color-status-failed-bg: #FCE8E6;
+  --color-status-failed-text: #C5221F;
+  --color-status-failed-border: #F8B4B4;
+
+  --color-status-verified-bg: #E8F6F6;
+  --color-status-verified-text: #159A98;
+  --color-status-verified-border: #159A98;
+
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  html, body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-background);
+    color: var(--color-on-surface);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

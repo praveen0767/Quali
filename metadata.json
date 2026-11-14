@@ -1,0 +1,6 @@
+{
+  "name": "Quali",
+  "description": "Eligibility, with Proof. Deterministic Academic & Early-Career Opportunity Intelligence Platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
