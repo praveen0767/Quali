@@ -76,6 +76,10 @@ export interface IngestedDocument {
   extractedClaimsCount: number;
   status: 'INDEXED' | 'PROCESSING' | 'FLAGGED';
   previewExcerpt: string;
+  // Real extraction provenance (optional for legacy/mock documents)
+  extractedText?: string;
+  pageTexts?: Array<{ pageNumber: number; text: string }>;
+  extractionStatus?: 'TEXT_EXTRACTED' | 'OCR_UNAVAILABLE' | 'INSUFFICIENT_EVIDENCE';
 }
 
 export interface EvidenceCitation {

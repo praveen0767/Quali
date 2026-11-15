@@ -174,7 +174,7 @@ export async function createApp(): Promise<express.Application> {
   app.post(
     '/api/v1/documents/upload',
     upload.single('file') as unknown as express.RequestHandler,
-    (req: Request, res: Response, next: NextFunction) => {
+    async (req: Request, res: Response, next: NextFunction) => {
       try {
         const file = req.file;
         if (!file) {
@@ -226,7 +226,7 @@ export async function createApp(): Promise<express.Application> {
         }
 
         // Process Document
-        const result = processDocument({
+        const result = await processDocument({
           filename: file.originalname,
           buffer: file.buffer,
           mimeType: file.mimetype,
@@ -1259,7 +1259,7 @@ export async function createApp(): Promise<express.Application> {
   });
 
   // Document processing with status tracking
-  app.post('/api/v1/workflow/documents/process', uploadLimiter.middleware, upload.single('file') as unknown as express.RequestHandler, (req: Request, res: Response, next: NextFunction) => {
+  app.post('/api/v1/workflow/documents/process', uploadLimiter.middleware, upload.single('file') as unknown as express.RequestHandler, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const file = req.file;
       if (!file) {
@@ -1294,8 +1294,8 @@ export async function createApp(): Promise<express.Application> {
       // Create processing request ID
       const requestId = `proc-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
-      // Process document synchronously (in real implementation, this could be async)
-      const result = processDocument({
+      // Process document (real PDF text extraction)
+      const result = await processDocument({
         filename: file.originalname,
         buffer: file.buffer,
         mimeType: file.mimetype,

@@ -31,6 +31,8 @@ describe('Workflow Integration Tests', () => {
   const createTestPdf = (seed: string): Buffer => {
     // Create a larger PDF content to pass minimum size validation (>1024 bytes)
     const padding = ' '.repeat(800); // Add padding to ensure >1024 bytes
+    const textLine = 'Student Academic Record Cumulative GPA: 3.92 Anticipated Degree Conferral Date: May 2026 Degree: M.S. Computer Science Primary Status: F-1 Student';
+    const streamBody = `BT /F1 12 Tf 1 0 0 1 100 700 Tm (${textLine}) Tj ET\n${padding}`;
     const pdfContent = `
 %PDF-1.4
 1 0 obj
@@ -43,9 +45,9 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length ${padding.length} >>
+<< /Length ${streamBody.length} >>
 stream
-${padding}
+${streamBody}
 endstream
 endobj
 xref

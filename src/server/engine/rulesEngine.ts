@@ -25,6 +25,24 @@ export interface EvaluationOutcome {
   insufficientCriteria: CriteriaRubric[];
 }
 
+function findPageEvidence(
+  doc: IngestedDocument,
+  patterns: RegExp[]
+): { pageNumber: number; lineNumber: number; verbatimQuote: string } | null {
+  if (!doc || !doc.pageTexts) return null;
+  for (const page of doc.pageTexts) {
+    const lines = (page.text || '').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      if (patterns.some((p) => p.test(line))) {
+        return { pageNumber: page.pageNumber, lineNumber: i + 1, verbatimQuote: line };
+      }
+    }
+  }
+  return null;
+}
+
 export function evaluateEligibility(
   opportunity: Opportunity,
   options: EvaluationOptions
@@ -55,15 +73,16 @@ export function evaluateEligibility(
   });
 
   // 2. Gate: Conferral / Matriculation Window
-  // If candidate graduation is within opportunity scope
-  const conferralGateStatus = 'PASS';
+  const candYear = parseInt(candidateProfile.graduationDate.slice(0, 4), 10);
+  const oppYear = parseInt(opportunity.deadline.slice(0, 4), 10);
+  const conferralGateStatus: 'PASS' | 'FAIL' = candYear >= oppYear ? 'PASS' : 'FAIL';
   hardGates.push({
     id: 'gate-conferral-window',
     name: 'Matriculation & Degree Conferral Window',
-    requiredRule: 'Candidate must maintain active enrollment through scheduled completion date.',
+    requiredRule: 'Candidate must maintain active enrollment through the opportunity application year.',
     candidateValue: `Anticipated Conferral: ${candidateProfile.graduationDate}`,
     status: conferralGateStatus,
-    evidenceSnippet: `Official Transcript Page 1: Anticipated Degree Conferral Date ${candidateProfile.graduationDate}. Student Status: Good Standing.`,
+    evidenceSnippet: `Official Transcript: Anticipated Degree Conferral Date ${candidateProfile.graduationDate}. Student Status: Good Standing.`,
   });
 
   // 3. Gate: GPA Threshold
@@ -125,66 +144,70 @@ export function evaluateEligibility(
       updated.status = citizenshipGateStatus === 'PASS' ? 'MEETS' : 'FAILED';
       updated.evaluatorNote = citizenshipEvidence;
       const visaEvidenceDoc = visaDoc || relevantDoc;
-      if (visaEvidenceDoc) {
+      const visaFound = visaEvidenceDoc ? findPageEvidence(visaEvidenceDoc, [/primary status/i, /student status/i, /f-1/i, /status:/i]) : null;
+      if (visaEvidenceDoc && visaFound) {
         updated.evidenceCitation = {
           id: `cit-${Date.now()}-${rubric.id}`,
           documentId: visaEvidenceDoc.id,
           documentName: visaEvidenceDoc.name,
-          pageNumber: 1,
-          lineNumber: 9,
-          verbatimQuote: 'Primary Status: F-1 Student. Program End Date: 2026-06-15. Institution: Stanford University.',
+          pageNumber: visaFound.pageNumber,
+          lineNumber: visaFound.lineNumber,
+          verbatimQuote: visaFound.verbatimQuote,
           confidence: 0.999,
           sha256Hash: visaEvidenceDoc.sha256,
-          reasonCode: 'SEVIS_F1_AUTHORIZED',
+          reasonCode: citizenshipGateStatus === 'PASS' ? 'SEVIS_F1_AUTHORIZED' : 'CITIZENSHIP_REQUIREMENT_NOT_MET',
           extractedDate: new Date().toISOString().split('T')[0],
         };
       }
     } else if (rubric.clauseCategory === 'GPA_THRESHOLD') {
       updated.status = gpaGateStatus === 'PASS' ? 'MEETS' : 'FAILED';
       updated.evaluatorNote = gpaEvidence;
-      if (relevantDoc) {
+      const gpaFound = relevantDoc ? findPageEvidence(relevantDoc, [/gpa/i, /cumulative/i]) : null;
+      if (relevantDoc && gpaFound) {
         updated.evidenceCitation = {
           id: `cit-${Date.now()}-${rubric.id}`,
           documentId: relevantDoc.id,
           documentName: relevantDoc.name,
-          pageNumber: 2,
-          lineNumber: 44,
-          verbatimQuote: 'Cumulative GPA: 3.92. Total Grade Points: 176.4 across 45 Units.',
+          pageNumber: gpaFound.pageNumber,
+          lineNumber: gpaFound.lineNumber,
+          verbatimQuote: gpaFound.verbatimQuote,
           confidence: 0.999,
           sha256Hash: relevantDoc.sha256,
-          reasonCode: 'GPA_MET_AUDITED_INDEX',
+          reasonCode: gpaGateStatus === 'PASS' ? 'GPA_MET_AUDITED_INDEX' : 'GPA_THRESHOLD_NOT_MET',
           extractedDate: new Date().toISOString().split('T')[0],
         };
       }
     } else if (rubric.clauseCategory === 'CONFERRAL_WINDOW') {
       updated.status = conferralGateStatus === 'PASS' ? 'MEETS' : 'FAILED';
-      if (relevantDoc) {
+      const confFound = relevantDoc ? findPageEvidence(relevantDoc, [/conferral/i, /graduation/i, /degree conferral/i, /anticipated/i]) : null;
+      if (relevantDoc && confFound) {
         updated.evidenceCitation = {
           id: `cit-${Date.now()}-${rubric.id}`,
           documentId: relevantDoc.id,
           documentName: relevantDoc.name,
-          pageNumber: 1,
-          lineNumber: 18,
-          verbatimQuote: 'Anticipated Degree Conferral Date: May 2026. Student Status: Good Standing.',
+          pageNumber: confFound.pageNumber,
+          lineNumber: confFound.lineNumber,
+          verbatimQuote: confFound.verbatimQuote,
           confidence: 0.998,
           sha256Hash: relevantDoc.sha256,
-          reasonCode: 'REGISTRAR_CONFERRAL_WINDOW_MATCH',
+          reasonCode: conferralGateStatus === 'PASS' ? 'REGISTRAR_CONFERRAL_WINDOW_MATCH' : 'CONFERRAL_WINDOW_NOT_MET',
           extractedDate: new Date().toISOString().split('T')[0],
         };
       }
     } else if (rubric.clauseCategory === 'EDUCATION_TIER') {
       updated.status = tierGateStatus === 'PASS' ? 'MEETS' : 'FAILED';
-      if (relevantDoc) {
+      const eduFound = relevantDoc ? findPageEvidence(relevantDoc, [/degree/i, /program/i, /education tier/i, /b\.s\.|m\.s\.|ph\.d/i]) : null;
+      if (relevantDoc && eduFound) {
         updated.evidenceCitation = {
           id: `cit-${Date.now()}-${rubric.id}`,
           documentId: relevantDoc.id,
           documentName: relevantDoc.name,
-          pageNumber: 1,
-          lineNumber: 1,
-          verbatimQuote: `Degree Program: ${candidateProfile.degree}. Education Tier: ${candidateProfile.educationTier}.`,
+          pageNumber: eduFound.pageNumber,
+          lineNumber: eduFound.lineNumber,
+          verbatimQuote: eduFound.verbatimQuote,
           confidence: 0.995,
           sha256Hash: relevantDoc.sha256,
-          reasonCode: 'DEGREE_TIER_VERIFIED',
+          reasonCode: tierGateStatus === 'PASS' ? 'DEGREE_TIER_VERIFIED' : 'DEGREE_TIER_NOT_MET',
           extractedDate: new Date().toISOString().split('T')[0],
         };
       }
@@ -200,17 +223,34 @@ export function evaluateEligibility(
         // Specific requirement for host PI commitment
         updated.status = 'INSUFFICIENT';
         updated.evaluatorNote = 'Faculty recommendation on file confirms candidate research excellence but lacks explicit hosting laboratory commitment addendum.';
+        const lorDoc = documents.find((d) => d.documentType === 'LOR');
+        const lorFound = lorDoc ? findPageEvidence(lorDoc, [/recommend/i, /highest recommendation/i, /host/i]) : null;
+        if (lorDoc && lorFound) {
+          updated.evidenceCitation = {
+            id: `cit-${Date.now()}-${rubric.id}`,
+            documentId: lorDoc.id,
+            documentName: lorDoc.name,
+            pageNumber: lorFound.pageNumber,
+            lineNumber: lorFound.lineNumber,
+            verbatimQuote: lorFound.verbatimQuote,
+            confidence: 0.912,
+            sha256Hash: lorDoc.sha256,
+            reasonCode: 'MISSING_EXPLICIT_HOST_SPONSOR_CLAUSE',
+            extractedDate: new Date().toISOString().split('T')[0],
+          };
+        }
       } else if (matches) {
         updated.status = 'MEETS';
         updated.evaluatorNote = 'Verified peer-reviewed publication and research pre-print align with domain focus requirements.';
-        if (domainDoc) {
+        const domainFound = domainDoc ? findPageEvidence(domainDoc, [/accepted at/i, /neurips/i, /preprint/i, /latent graph/i, /benchmark/i]) : null;
+        if (domainDoc && domainFound) {
           updated.evidenceCitation = {
             id: `cit-${Date.now()}-${rubric.id}`,
             documentId: domainDoc.id,
             documentName: domainDoc.name,
-            pageNumber: 3,
-            lineNumber: 14,
-            verbatimQuote: '"Latent Graph Alignments in Single-Cell RNA Sequencing", accepted at NeurIPS 2024 Workshop. Benchmarked against 10M protein embeddings.',
+            pageNumber: domainFound.pageNumber,
+            lineNumber: domainFound.lineNumber,
+            verbatimQuote: domainFound.verbatimQuote,
             confidence: 0.984,
             sha256Hash: domainDoc.sha256,
             reasonCode: 'PEER_REVIEWED_DOMAIN_ALIGNMENT',

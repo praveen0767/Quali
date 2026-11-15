@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { IngestedDocument, EvidenceCitation, CriteriaRubric, ExtractionProvenance, ExtractionConfidence, SchemaValidationStatus } from '../../lib/api/types';
 import { verifyVerbatimMatch } from './promptInjection';
 import { safeContentProcessor, detectPromptInjection } from './promptInjection';
+import { PDFParse } from 'pdf-parse';
 
 export const MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
 export const MAX_PAGES_PER_DOCUMENT = 50; // Prevent oversized document processing
@@ -141,130 +142,54 @@ export function scanForPromptInjection(buffer: Buffer): {
   return { detected: false, severity: 'LOW' };
 }
 
-export function processDocument(params: ProcessDocumentParams): DocumentProcessingResult {
+export async function processDocument(params: ProcessDocumentParams): Promise<DocumentProcessingResult> {
   const sha256 = computeSha256(params.buffer);
   const docId = `doc-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
   const now = new Date().toISOString();
 
-  // Basic page detection (counting PDF page markers or defaulting based on size)
+  const isPdf = params.mimeType.toLowerCase() === 'application/pdf';
+
+  let pageTexts: Array<{ pageNumber: number; text: string }> = [];
   let pageCount = 1;
-  const contentString = params.buffer.toString('binary');
-  const pdfMatches = contentString.match(/\/Type\s*\/Page[^s]/g);
-  if (pdfMatches && pdfMatches.length > 0) {
-    pageCount = pdfMatches.length;
-  } else if (params.buffer.length > 500000) {
-    pageCount = Math.max(2, Math.min(24, Math.floor(params.buffer.length / 250000)));
+  let extractedText = '';
+  let extractionStatus: IngestedDocument['extractionStatus'] = 'INSUFFICIENT_EVIDENCE';
+  let ocrConfidence = 0;
+  let extractedClaimsCount = 0;
+
+  if (isPdf) {
+    try {
+      const parser = new PDFParse({ data: params.buffer });
+      const result = await parser.getText();
+      await parser.destroy();
+      pageCount = result.total || result.pages.length || 1;
+      pageTexts = result.pages.map((p) => ({ pageNumber: p.num, text: p.text || '' }));
+      extractedText = pageTexts.map((p) => p.text).join('\n');
+      const hasText = pageTexts.some((p) => (p.text || '').trim().length > 0);
+      extractionStatus = hasText ? 'TEXT_EXTRACTED' : 'OCR_UNAVAILABLE';
+      ocrConfidence = hasText ? 0.99 : 0;
+      const claimLines = extractedText.split(/\r?\n/).filter((l) => /:/.test(l) || /gpa/i.test(l) || /degree/i.test(l));
+      extractedClaimsCount = claimLines.length;
+    } catch (err) {
+      extractionStatus = 'OCR_UNAVAILABLE';
+      pageCount = 1;
+      pageTexts = [];
+      extractedText = '';
+      ocrConfidence = 0;
+      extractedClaimsCount = 0;
+    }
+  } else {
+    extractionStatus = 'OCR_UNAVAILABLE';
+    pageCount = 1;
+    ocrConfidence = 0;
+    extractedClaimsCount = 0;
   }
 
-  let extractedClaimsCount = 4;
-  let ocrConfidence = 0.994;
-  let previewExcerpt = `Extracted verified academic claims from ${params.filename}. Validated against academic eligibility index.`;
   const extractedCitations: EvidenceCitation[] = [];
 
-  switch (params.documentType) {
-    case 'TRANSCRIPT':
-      extractedClaimsCount = 14;
-      ocrConfidence = 0.998;
-      previewExcerpt = `Official Registrar Attestation from ${params.filename}. Verified Degree Conferral, GPA Benchmarks, and Enrolled Units.`;
-      extractedCitations.push({
-        id: `cit-${Date.now()}-1`,
-        documentId: docId,
-        documentName: params.filename,
-        pageNumber: 1,
-        lineNumber: 18,
-        verbatimQuote: 'Anticipated Degree Conferral Date: May 2026. Student Status: Good Standing.',
-        confidence: 0.998,
-        sha256Hash: sha256,
-        reasonCode: 'REGISTRAR_CONFERRAL_WINDOW_MATCH',
-        extractedDate: now.split('T')[0],
-      });
-      extractedCitations.push({
-        id: `cit-${Date.now()}-2`,
-        documentId: docId,
-        documentName: params.filename,
-        pageNumber: 2,
-        lineNumber: 44,
-        verbatimQuote: 'Cumulative GPA: 3.92. Total Grade Points: 176.4 across 45 Units.',
-        confidence: 0.999,
-        sha256Hash: sha256,
-        reasonCode: 'GPA_MET_AUDITED_INDEX',
-        extractedDate: now.split('T')[0],
-      });
-      break;
-
-    case 'PREPRINT':
-      extractedClaimsCount = 22;
-      ocrConfidence = 0.992;
-      previewExcerpt = `Research Pre-print: Title, authorship, and benchmark representations parsed from ${params.filename}.`;
-      extractedCitations.push({
-        id: `cit-${Date.now()}-3`,
-        documentId: docId,
-        documentName: params.filename,
-        pageNumber: 3,
-        lineNumber: 14,
-        verbatimQuote: '“Latent Graph Alignments in Single-Cell RNA Sequencing”, accepted at NeurIPS 2024 Workshop. Benchmarked against 10M protein embeddings.',
-        confidence: 0.984,
-        sha256Hash: sha256,
-        reasonCode: 'PEER_REVIEWED_DOMAIN_ALIGNMENT',
-        extractedDate: now.split('T')[0],
-      });
-      break;
-
-    case 'I20_VISA':
-      extractedClaimsCount = 6;
-      ocrConfidence = 0.999;
-      previewExcerpt = `SEVIS Non-immigrant Record: Form I-20 verified for F-1 student status with STEM OPT extension eligibility.`;
-      extractedCitations.push({
-        id: `cit-${Date.now()}-4`,
-        documentId: docId,
-        documentName: params.filename,
-        pageNumber: 1,
-        lineNumber: 9,
-        verbatimQuote: 'Primary Status: F-1 Student. Program End Date: 2026-06-15. Institution: Stanford University.',
-        confidence: 0.999,
-        sha256Hash: sha256,
-        reasonCode: 'SEVIS_F1_AUTHORIZED',
-        extractedDate: now.split('T')[0],
-      });
-      break;
-
-    case 'LOR':
-      extractedClaimsCount = 9;
-      ocrConfidence = 0.988;
-      previewExcerpt = `Faculty Letter of Support: Recommendation endorsement and research evaluation index from ${params.filename}.`;
-      extractedCitations.push({
-        id: `cit-${Date.now()}-5`,
-        documentId: docId,
-        documentName: params.filename,
-        pageNumber: 2,
-        lineNumber: 31,
-        verbatimQuote: '“I give Elena my highest recommendation for graduate opportunities in bio-computational modeling.”',
-        confidence: 0.912,
-        sha256Hash: sha256,
-        reasonCode: 'MISSING_EXPLICIT_HOST_SPONSOR_CLAUSE',
-        extractedDate: now.split('T')[0],
-      });
-      break;
-
-    case 'CV':
-    default:
-      extractedClaimsCount = 8;
-      ocrConfidence = 0.991;
-      previewExcerpt = `Curriculum Vitae / Credentials dossier parsed from ${params.filename}.`;
-      extractedCitations.push({
-        id: `cit-${Date.now()}-6`,
-        documentId: docId,
-        documentName: params.filename,
-        pageNumber: 1,
-        lineNumber: 5,
-        verbatimQuote: `Document authenticated under SHA-256 ${sha256.slice(0, 16)}...`,
-        confidence: 0.991,
-        sha256Hash: sha256,
-        reasonCode: 'DOSSIER_VERIFIED',
-        extractedDate: now.split('T')[0],
-      });
-      break;
-  }
+  const previewExcerpt =
+    extractionStatus === 'OCR_UNAVAILABLE'
+      ? `OCR_UNAVAILABLE: no extractable text found in ${params.filename}.`
+      : extractedText.slice(0, 240).replace(/\s+/g, ' ').trim() || `Extracted text from ${params.filename}.`;
 
   const document: IngestedDocument = {
     id: docId,
@@ -279,6 +204,9 @@ export function processDocument(params: ProcessDocumentParams): DocumentProcessi
     extractedClaimsCount,
     status: 'INDEXED',
     previewExcerpt,
+    extractedText,
+    pageTexts,
+    extractionStatus,
   };
 
   return {
